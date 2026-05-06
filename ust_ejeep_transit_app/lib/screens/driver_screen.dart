@@ -19,6 +19,7 @@ class DriverScreen extends StatefulWidget {
 
 class _DriverScreenState extends State<DriverScreen> {
   bool _isStreaming = false;
+  bool _isPuno = false;
   String _status = 'stopped';
 
   final LocationService _locationService = LocationService();
@@ -181,6 +182,15 @@ class _DriverScreenState extends State<DriverScreen> {
                                 .textTheme
                                 .bodyMedium
                                 ?.copyWith(color: Colors.black54),
+                          ),
+                          SwitchListTile(
+                            title: const Text('Puno (Full)'),
+                            value: _isPuno,
+                            onChanged: (value) {
+                              setState(() => _isPuno = value);
+                              _locationService.setIsPuno(value);
+                            },
+                            contentPadding: EdgeInsets.zero,
                           ),
                         ],
                       ),

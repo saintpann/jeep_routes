@@ -2,5 +2,6 @@
 export 'auth_service.dart';
 export 'eta_service.dart';
 export 'location_service.dart';
+export 'pin_service.dart';
 export 'route_data_service.dart';
 export 'vehicle_data_listener.dart';

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:firebase_database/firebase_database.dart';
 import 'package:flutter/material.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 
 import '../models/models.dart';
@@ -23,6 +24,7 @@ class _StudentMapScreenState extends State<StudentMapScreen> {
   // Marker sets
   Map<MarkerId, Marker> _vehicleMarkers = {};
   Map<MarkerId, Marker> _stopMarkers = {};
+  Map<MarkerId, Marker> _pinMarkers = {};
 
   // Route overlays
   Set<Polyline> _routePolylines = {};
@@ -30,14 +32,18 @@ class _StudentMapScreenState extends State<StudentMapScreen> {
   // Services
   final VehicleDataListener _vehicleListener = VehicleDataListener();
   final RouteDataService _routeService = RouteDataService();
+  final PinService _pinService = PinService();
 
   // Subscriptions
   StreamSubscription<Map<String, VehicleState>>? _vehicleSubscription;
   StreamSubscription<DatabaseEvent>? _connectionSubscription;
+  StreamSubscription<DatabaseEvent>? _strikeAlertSubscription;
+  StreamSubscription<List<CommutterPin>>? _pinSubscription;
 
   // State
   bool _isConnected = true;
   List<RouteGeoJSON> _routes = [];
+  String _strikeAlertText = '';
 
   // ---------------------------------------------------------------------------
   // Lifecycle
@@ -64,13 +70,30 @@ class _StudentMapScreenState extends State<StudentMapScreen> {
         setState(() => _isConnected = connected);
       }
     });
+
+    // Listen to strike alert.
+    _strikeAlertSubscription = FirebaseDatabase.instance
+        .ref('system/strikeAlert')
+        .onValue
+        .listen((event) {
+      final value = event.snapshot.value as String? ?? '';
+      if (mounted) {
+        setState(() => _strikeAlertText = value);
+      }
+    });
+
+    // Subscribe to commuter context pins.
+    _pinSubscription = _pinService.pinsStream.listen(_onPinsUpdate);
   }
 
   @override
   void dispose() {
     _vehicleSubscription?.cancel();
     _connectionSubscription?.cancel();
+    _strikeAlertSubscription?.cancel();
+    _pinSubscription?.cancel();
     _vehicleListener.dispose();
+    _pinService.dispose();
     _mapController?.dispose();
     super.dispose();
   }
@@ -131,8 +154,14 @@ class _StudentMapScreenState extends State<StudentMapScreen> {
     for (final vehicle in snapshot.values) {
       final markerId = MarkerId(vehicle.vehicleId);
 
-      // Determine marker hue from route color.
-      final double hue = _hueForRouteId(vehicle.routeId);
+      // Puno (full) vehicles use a red marker and a "FULL" prefix in the
+      // snippet; all other vehicles use the route-derived hue.
+      final double hue = vehicle.isPuno
+          ? BitmapDescriptor.hueRed
+          : _hueForRouteId(vehicle.routeId);
+      final String snippet = vehicle.isPuno
+          ? 'FULL • Route: ${vehicle.routeId} • Updated ${_timeAgo(vehicle.timestamp)}'
+          : 'Route: ${vehicle.routeId} • Updated ${_timeAgo(vehicle.timestamp)}';
 
       newMarkers[markerId] = Marker(
         markerId: markerId,
@@ -140,8 +169,7 @@ class _StudentMapScreenState extends State<StudentMapScreen> {
         icon: BitmapDescriptor.defaultMarkerWithHue(hue),
         infoWindow: InfoWindow(
           title: vehicle.driverName,
-          snippet:
-              'Route: ${vehicle.routeId} • Updated ${_timeAgo(vehicle.timestamp)}',
+          snippet: snippet,
         ),
       );
     }
@@ -173,6 +201,94 @@ class _StudentMapScreenState extends State<StudentMapScreen> {
       // Route not found — fall through to default.
     }
     return BitmapDescriptor.hueRed; // default
+  }
+
+  // ---------------------------------------------------------------------------
+  // Commuter context pins (Tasks 23.2, 23.3)
+  // ---------------------------------------------------------------------------
+
+  /// Called whenever the pins stream emits a new list of active pins.
+  void _onPinsUpdate(List<CommutterPin> pins) {
+    final Map<MarkerId, Marker> newPinMarkers = {};
+
+    for (final pin in pins) {
+      final markerId = MarkerId('pin_${pin.pinId}');
+
+      final double hue = switch (pin.type) {
+        'sos' => BitmapDescriptor.hueRed,
+        'blocked' => BitmapDescriptor.hueViolet,
+        'long_line' => BitmapDescriptor.hueYellow,
+        _ => BitmapDescriptor.hueOrange,
+      };
+
+      newPinMarkers[markerId] = Marker(
+        markerId: markerId,
+        position: LatLng(pin.latitude, pin.longitude),
+        icon: BitmapDescriptor.defaultMarkerWithHue(hue),
+        infoWindow: InfoWindow(
+          title: _labelForPinType(pin.type),
+          snippet: _timeAgo(pin.timestamp),
+        ),
+      );
+    }
+
+    setState(() => _pinMarkers = newPinMarkers);
+  }
+
+  /// Returns a human-readable label for a pin type.
+  String _labelForPinType(String type) {
+    return switch (type) {
+      'sos' => '🚨 SOS / Stranded',
+      'blocked' => '🛑 Route Blocked',
+      'long_line' => '🟡 Long Line',
+      _ => '📍 Report',
+    };
+  }
+
+  /// Shows the bottom sheet for dropping a commuter context pin.
+  Future<void> _showPinBottomSheet() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: const Text('🚨 SOS / Stranded'),
+              onTap: () => _dropPinAndPop(ctx, 'sos'),
+            ),
+            ListTile(
+              title: const Text('🛑 Route Blocked'),
+              onTap: () => _dropPinAndPop(ctx, 'blocked'),
+            ),
+            ListTile(
+              title: const Text('🟡 Long Line'),
+              onTap: () => _dropPinAndPop(ctx, 'long_line'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Gets the current position and drops a pin of [type], then pops [sheetCtx].
+  Future<void> _dropPinAndPop(BuildContext sheetCtx, String type) async {
+    try {
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      await _pinService.dropPin(position.latitude, position.longitude, type);
+      if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+    } catch (_) {
+      if (sheetCtx.mounted) Navigator.of(sheetCtx).pop();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Location unavailable — cannot drop pin.'),
+          ),
+        );
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -233,6 +349,7 @@ class _StudentMapScreenState extends State<StudentMapScreen> {
     final allMarkers = {
       ..._stopMarkers,
       ..._vehicleMarkers,
+      ..._pinMarkers,
     };
 
     return Scaffold(
@@ -240,48 +357,75 @@ class _StudentMapScreenState extends State<StudentMapScreen> {
         title: const Text('UST E-Jeep Live Map'),
         centerTitle: true,
       ),
-      body: Stack(
+      floatingActionButton: FloatingActionButton(
+        onPressed: _showPinBottomSheet,
+        tooltip: 'Report a hazard',
+        child: const Icon(Icons.add_location_alt),
+      ),
+      body: Column(
         children: [
-          GoogleMap(
-            initialCameraPosition: const CameraPosition(
-              target: LatLng(14.6097, 120.9897),
-              zoom: 15,
-            ),
-            markers: Set<Marker>.of(allMarkers.values),
-            polylines: _routePolylines,
-            onMapCreated: (controller) {
-              _mapController = controller;
-            },
-            myLocationButtonEnabled: false,
-          ),
-          if (!_isConnected)
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Material(
-                color: Colors.amber.shade700,
-                child: const Padding(
-                  padding:
-                      EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-                  child: Row(
-                    children: [
-                      Icon(Icons.wifi_off, color: Colors.white, size: 18),
-                      SizedBox(width: 8),
-                      Text(
-                        'Reconnecting…',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
+          if (_strikeAlertText.isNotEmpty) _buildStrikeAlertBanner(),
+          Expanded(
+            child: Stack(
+              children: [
+                GoogleMap(
+                  initialCameraPosition: const CameraPosition(
+                    target: LatLng(14.6097, 120.9897),
+                    zoom: 15,
+                  ),
+                  markers: Set<Marker>.of(allMarkers.values),
+                  polylines: _routePolylines,
+                  onMapCreated: (controller) {
+                    _mapController = controller;
+                  },
+                  myLocationButtonEnabled: false,
+                ),
+                if (!_isConnected)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: Material(
+                      color: Colors.amber.shade700,
+                      child: const Padding(
+                        padding:
+                            EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        child: Row(
+                          children: [
+                            Icon(Icons.wifi_off, color: Colors.white, size: 18),
+                            SizedBox(width: 8),
+                            Text(
+                              'Reconnecting…',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
+                    ),
                   ),
-                ),
-              ),
+              ],
             ),
+          ),
         ],
       ),
+    );
+  }
+
+  Widget _buildStrikeAlertBanner() {
+    return MaterialBanner(
+      backgroundColor: Colors.amber.shade700,
+      leading: const Icon(Icons.warning_amber_rounded, color: Colors.white),
+      content: Text(
+        _strikeAlertText,
+        style: const TextStyle(
+          color: Colors.white,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      actions: const [SizedBox.shrink()],
     );
   }
 }

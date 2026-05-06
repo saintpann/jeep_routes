@@ -40,8 +40,9 @@ VehicleState? buildLocationPayload(
   String driverUID,
   String driverName,
   String routeId,
-  Position position,
-) {
+  Position position, {
+  bool isPuno = false,
+}) {
   final lat = position.latitude;
   final lng = position.longitude;
   final acc = position.accuracy;
@@ -62,6 +63,7 @@ VehicleState? buildLocationPayload(
     speed: position.speed,
     timestamp: DateTime.now().millisecondsSinceEpoch,
     isActive: true,
+    isPuno: isPuno,
   );
 }
 
@@ -87,6 +89,12 @@ class LocationService {
   String? _activeDriverUID;
   String? _activeDriverName;
   String? _activeRouteId;
+  bool _isPuno = false;
+
+  /// Sets whether this vehicle is on the Puno route.
+  void setIsPuno(bool value) {
+    _isPuno = value;
+  }
 
   /// Stream of status messages emitted by this service.
   ///
@@ -240,7 +248,7 @@ class LocationService {
 
     // 5b. Build payload.
     final payload =
-        buildLocationPayload(driverUID, driverName, routeId, position);
+        buildLocationPayload(driverUID, driverName, routeId, position, isPuno: _isPuno);
     if (payload == null) return;
 
     // Write to RTDB.

@@ -11,6 +11,7 @@ class VehicleState {
   final double speed;
   final int timestamp;
   final bool isActive;
+  final bool isPuno;
 
   const VehicleState({
     required this.vehicleId,
@@ -23,6 +24,7 @@ class VehicleState {
     required this.speed,
     required this.timestamp,
     required this.isActive,
+    this.isPuno = false,
   });
 
   /// Deserialize from a Firebase RTDB JSON map.
@@ -40,6 +42,7 @@ class VehicleState {
       // to handle both int and double representations safely.
       timestamp: (json['timestamp'] as num).toInt(),
       isActive: json['isActive'] as bool,
+      isPuno: json['isPuno'] as bool? ?? false,
     );
   }
 
@@ -56,6 +59,7 @@ class VehicleState {
       'speed': speed,
       'timestamp': timestamp,
       'isActive': isActive,
+      'isPuno': isPuno,
     };
   }
 
@@ -71,6 +75,7 @@ class VehicleState {
     double? speed,
     int? timestamp,
     bool? isActive,
+    bool? isPuno,
   }) {
     return VehicleState(
       vehicleId: vehicleId ?? this.vehicleId,
@@ -83,6 +88,7 @@ class VehicleState {
       speed: speed ?? this.speed,
       timestamp: timestamp ?? this.timestamp,
       isActive: isActive ?? this.isActive,
+      isPuno: isPuno ?? this.isPuno,
     );
   }
 
@@ -99,7 +105,8 @@ class VehicleState {
         other.heading == heading &&
         other.speed == speed &&
         other.timestamp == timestamp &&
-        other.isActive == isActive;
+        other.isActive == isActive &&
+        other.isPuno == isPuno;
   }
 
   @override
@@ -115,6 +122,7 @@ class VehicleState {
       speed,
       timestamp,
       isActive,
+      isPuno,
     );
   }
 
@@ -130,7 +138,8 @@ class VehicleState {
         'heading: $heading, '
         'speed: $speed, '
         'timestamp: $timestamp, '
-        'isActive: $isActive'
+        'isActive: $isActive, '
+        'isPuno: $isPuno'
         ')';
   }
 }

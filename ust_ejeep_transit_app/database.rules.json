@@ -6,6 +6,18 @@
         ".write": "auth != null && auth.uid === $uid",
         ".read": "auth != null"
       }
+    },
+    "system": {
+      "strikeAlert": {
+        ".read": "auth != null",
+        ".write": "auth != null && auth.token.admin == true"
+      }
+    },
+    "pins": {
+      ".read": "auth != null",
+      "$pinId": {
+        ".write": "auth != null && !data.exists()"
+      }
     }
   }
 }
