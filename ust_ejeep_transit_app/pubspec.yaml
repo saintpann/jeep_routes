@@ -1,0 +1,31 @@
+name: ust_ejeep_transit_app
+description: UST E-Jeep Transit App with real-time GPS tracking.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.0.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_core: ^2.24.2
+  firebase_auth: ^4.16.0
+  firebase_database: ^10.4.0
+  cloud_firestore: ^4.14.0
+  cloud_functions: ^4.6.0
+  google_maps_flutter: ^2.5.3
+  geolocator: ^10.1.0
+  permission_handler: ^11.1.0
+  shared_preferences: ^2.2.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  mockito: ^5.4.4
+  build_runner: ^2.4.7
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/routes.geojson
